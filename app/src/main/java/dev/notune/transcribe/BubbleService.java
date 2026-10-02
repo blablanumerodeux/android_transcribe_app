@@ -300,11 +300,26 @@ public class BubbleService extends AccessibilityService {
             String tl = t.toLowerCase();
             boolean isPlaceholderWord =
                     tl.equals("message") || tl.equals("message...")
-                 || tl.equals("type a message") || tl.equals("write a message")
+                 || tl.equals("message…") || tl.equals("message… ")
+                 || tl.equals("type a message") || tl.equals("type a message…")
+                 || tl.equals("write a message") || tl.equals("write a message…")
                  || tl.equals("say something") || tl.equals("say something...")
-                 || tl.equals("envoyer un message") || tl.equals("message sms/mms")
-                 || tl.equals("text message") || tl.equals("e-mail")
-                 || tl.equals("search") || tl.equals("rechercher");
+                 || tl.equals("say something…")
+                 || tl.equals("envoyer un message") || tl.equals("envoyer un message…")
+                 || tl.equals("message sms/mms") || tl.equals("text message")
+                 || tl.equals("e-mail") || tl.equals("email")
+                 || tl.equals("search") || tl.equals("search…")
+                 || tl.equals("rechercher") || tl.equals("rechercher…");
+            // Trim a trailing ellipsis for comparison too ("Message…" etc.)
+            if (!isPlaceholderWord) {
+                String t2 = tl.replaceFirst("(…|\\.\\.\\.)$", "").trim();
+                if (t2.equals("message") || t2.equals("type a message")
+                        || t2.equals("write a message") || t2.equals("say something")
+                        || t2.equals("envoyer un message") || t2.equals("text message")
+                        || t2.equals("search") || t2.equals("rechercher")) {
+                    isPlaceholderWord = true;
+                }
+            }
             if (isPlaceholderWord && now.equals(fieldSnapshot)) {
                 // Same placeholder since focus AND it's a placeholder word
                 // AND the user didn't type during dictation → field is empty.
