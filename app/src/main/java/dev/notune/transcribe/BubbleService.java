@@ -37,9 +37,14 @@ public class BubbleService extends AccessibilityService {
 
     private AccessibilityNodeInfo focusedEditable;
     private String fieldSnapshot = "";
+    private String focusSnapshot = "";
     private boolean userTypedSinceFocus;
     private int lastSelStart = -1, lastSelEnd = -1;
     private final java.util.HashMap<String, String> knownContent = new java.util.HashMap<>();
+    private void rememberKnown(String key, String val) {
+        if (knownContent.size() > 32) knownContent.clear(); // bounded
+        knownContent.put(key, val);
+    }
     private volatile long snoozedUntil;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -51,7 +56,9 @@ public class BubbleService extends AccessibilityService {
     protected void onServiceConnected() {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();        info.eventTypes = AccessibilityEvent.TYPE_VIEW_FOCUSED
-                | AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+                | AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                | AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                | AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
         info.flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
         info.notificationTimeout = 100;
@@ -94,6 +101,9 @@ public class BubbleService extends AccessibilityService {
             if (node != null) {
                 focusedEditable = node;
                 userTypedSinceFocus = false;
+                lastSelStart = -1; lastSelEnd = -1;
+                CharSequence fs = node.getText();
+                focusSnapshot = (fs == null) ? "" : fs.toString();
                 showBubble();
             } else {
                 focusedEditable = null;
@@ -105,6 +115,9 @@ public class BubbleService extends AccessibilityService {
             if (node != null) {
                 focusedEditable = node;
                 userTypedSinceFocus = false;
+                lastSelStart = -1; lastSelEnd = -1;
+                CharSequence fs = node.getText();
+                focusSnapshot = (fs == null) ? "" : fs.toString();
                 showBubble();
             } else {
                 focusedEditable = null;
@@ -175,6 +188,11 @@ public class BubbleService extends AccessibilityService {
                     }
                     return false;
                 }
+                case MotionEvent.ACTION_CANCEL:
+                    moved = false;
+                    dragging = false;
+                    hideSnoozeZone();
+                    return true;
                 case MotionEvent.ACTION_UP: {
                     boolean wasDrag = moved;
                     moved = false;
@@ -284,6 +302,9 @@ public class BubbleService extends AccessibilityService {
         if (node != null) {
             focusedEditable = node;
             userTypedSinceFocus = false;
+            lastSelStart = -1; lastSelEnd = -1;
+            CharSequence fs2 = node.getText();
+            focusSnapshot = (fs2 == null) ? "" : fs2.toString();
             showBubble();
         }
     }
@@ -311,7 +332,7 @@ public class BubbleService extends AccessibilityService {
         // was actually empty and we replace the whole content.
         fieldSnapshot = focusedEditable.getText() != null
                 ? focusedEditable.getText().toString() : "";
-        bubble.setText("…");
+        if (bubble != null) bubble.setText("…");
         setBubbleColor(COL_LISTENING);
         initNative(this);
         startRecording();
@@ -403,19 +424,29 @@ public class BubbleService extends AccessibilityService {
             // Remember the last REAL content we saw per field. If we already
             // recorded real user text (or our own earlier insert) for this
             // node, the current content is genuine — append, never strip.
-            String key = String.valueOf(System.identityHashCode(focusedEditable));
+            String key = focusedEditable.getPackageName() + "/"
+                    + focusedEditable.getViewIdResourceName() + "/@"
+                    + Integer.toHexString(focusedEditable.hashCode());
             String known = knownContent.get(key);
+            // Placeholder strip ONLY when the content is byte-identical to what
+            // the field had AT FOCUS TIME (nothing typed since) — the snapshot
+            // taken at dictation start is too late: text typed before starting
+            // the recording would be captured and wrongly stripped (WhatsApp
+            // poll forms). Focus snapshot = authoritative "this was empty".
             boolean isEmptyish = !userTypedSinceFocus
-                    && now.equals(fieldSnapshot) && !now.isEmpty()
+                    && now.equals(focusSnapshot) && !now.isEmpty()
                     && (known == null || known.isEmpty());
             if (isEmptyish) {
                 CharSequence hint = focusedEditable.getHintText();
                 boolean hintMatch = hint != null && hint.toString().contentEquals(now);
-                int words = now.trim().split("\\s+").length;
-                boolean shortHintLike = now.length() <= 40 && words <= 6;
-                if (hintMatch || shortHintLike) base = "";
+                // Strip only on a REAL hint match, or when the focus snapshot
+                // was genuinely empty (some apps expose placeholder as text
+                // with no hint). Never strip a short non-hint string — that's
+                // a real draft ("Yes", "ok") and erasing it is bug #2.
+                boolean emptyAtFocus = focusSnapshot.isEmpty();
+                if (hintMatch || (emptyAtFocus && now.length() <= 40)) base = "";
             }
-            knownContent.put(key, base + text);
+            rememberKnown(key, base + text);
             // Insert at the cursor position when available; append otherwise.
             // Cursor info is read synchronously; if the app doesn't expose it
             // (sel == -1), fall back to the last selection-changed event seen
@@ -472,6 +503,7 @@ public class BubbleService extends AccessibilityService {
     public void onDestroy() {
         if (recording) { try { cancelRecording(); } catch (Throwable ignored) {} }
         try { cleanupNative(); } catch (Throwable ignored) {}
+        hideSnoozeZone();
         hideBubble();
         super.onDestroy();
     }
