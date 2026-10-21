@@ -437,14 +437,13 @@ public class BubbleService extends AccessibilityService {
                     && now.equals(focusSnapshot) && !now.isEmpty()
                     && (known == null || known.isEmpty());
             if (isEmptyish) {
-                CharSequence hint = focusedEditable.getHintText();
-                boolean hintMatch = hint != null && hint.toString().contentEquals(now);
-                // Strip only on a REAL hint match, or when the focus snapshot
-                // was genuinely empty (some apps expose placeholder as text
-                // with no hint). Never strip a short non-hint string — that's
-                // a real draft ("Yes", "ok") and erasing it is bug #2.
-                boolean emptyAtFocus = focusSnapshot.isEmpty();
-                if (hintMatch || (emptyAtFocus && now.length() <= 40)) base = "";
+                // Content is byte-identical to what the field had at focus
+                // and no text-change event fired since: it's app-provided
+                // placeholder (hint-as-text OR hint OR prefilled label like
+                // "Message"). Strip unconditionally — user-typed text always
+                // fires a text-change event, so a real draft can never be
+                // byte-identical to the focus snapshot after interaction.
+                base = "";
             }
             rememberKnown(key, base + text);
             // Insert at the cursor position when available; append otherwise.
