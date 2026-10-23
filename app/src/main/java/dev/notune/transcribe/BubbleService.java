@@ -45,6 +45,19 @@ public class BubbleService extends AccessibilityService {
         if (knownContent.size() > 32) knownContent.clear(); // bounded
         knownContent.put(key, val);
     }
+
+    /** Stable per-field identity surviving node re-fetches: package + view id
+     *  (falls back to class name when the app exposes no resource id). */
+    private String sameField(AccessibilityNodeInfo other) {
+        if (other == null) return false;
+        String a = focusedEditable.getPackageName() + "|"
+                + focusedEditable.getViewIdResourceName() + "|"
+                + focusedEditable.getClassName();
+        String b = other.getPackageName() + "|"
+                + other.getViewIdResourceName() + "|"
+                + other.getClassName();
+        return a.equals(b);
+    }
     private volatile long snoozedUntil;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -82,7 +95,7 @@ public class BubbleService extends AccessibilityService {
         int t = event.getEventType();
         if (t == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
                 && focusedEditable != null && event.getSource() != null
-                && focusedEditable.equals(event.getSource())) {
+                && sameField(event.getSource())) {
             lastSelStart = event.getFromIndex();
             lastSelEnd = event.getToIndex();
             return;
@@ -90,7 +103,7 @@ public class BubbleService extends AccessibilityService {
         if (t == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
                 && focusedEditable != null
                 && event.getSource() != null
-                && focusedEditable.equals(event.getSource())) {
+                && sameField(event.getSource())) {
             userTypedSinceFocus = true; // real keystrokes on this field
             return;
         }
@@ -110,14 +123,21 @@ public class BubbleService extends AccessibilityService {
                 if (bubbleVisible && !recording) hideBubble();
             }
         } else if (t == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            // New window: keep the bubble only if an editable is actually focused in it
+            // New window: keep the bubble only if an editable is actually
+            // focused in it. NOTE: do NOT reset focusSnapshot/userTyped here —
+            // this event also fires when the KEYBOARD opens/closes on the SAME
+            // field; resetting the snapshot then would capture user-typed text
+            // and corrupt the placeholder-strip invariant (intermittent erase).
             AccessibilityNodeInfo node = findFocusedEditable(getRootInActiveWindow());
             if (node != null) {
-                focusedEditable = node;
-                userTypedSinceFocus = false;
-                lastSelStart = -1; lastSelEnd = -1;
-                CharSequence fs = node.getText();
-                focusSnapshot = (fs == null) ? "" : fs.toString();
+                if (focusedEditable == null || !sameField(node)) {
+                    // Genuinely new field — snapshot it fresh.
+                    focusedEditable = node;
+                    userTypedSinceFocus = false;
+                    lastSelStart = -1; lastSelEnd = -1;
+                    CharSequence fs = node.getText();
+                    focusSnapshot = (fs == null) ? "" : fs.toString();
+                }
                 showBubble();
             } else {
                 focusedEditable = null;
