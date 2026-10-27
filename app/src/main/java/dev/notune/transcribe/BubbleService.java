@@ -48,8 +48,8 @@ public class BubbleService extends AccessibilityService {
 
     /** Stable per-field identity surviving node re-fetches: package + view id
      *  (falls back to class name when the app exposes no resource id). */
-    private String sameField(AccessibilityNodeInfo other) {
-        if (other == null) return false;
+    private boolean sameField(AccessibilityNodeInfo other) {
+        if (other == null || focusedEditable == null) return false;
         String a = focusedEditable.getPackageName() + "|"
                 + focusedEditable.getViewIdResourceName() + "|"
                 + focusedEditable.getClassName();
@@ -457,13 +457,13 @@ public class BubbleService extends AccessibilityService {
                     && now.equals(focusSnapshot) && !now.isEmpty()
                     && (known == null || known.isEmpty());
             if (isEmptyish) {
-                // Content is byte-identical to what the field had at focus
-                // and no text-change event fired since: it's app-provided
-                // placeholder (hint-as-text OR hint OR prefilled label like
-                // "Message"). Strip unconditionally — user-typed text always
-                // fires a text-change event, so a real draft can never be
-                // byte-identical to the focus snapshot after interaction.
-                base = "";
+                // Conservative: strip ONLY when the content matches the node's
+                // exposed hint (a real placeholder). Pre-filled content that is
+                // NOT a hint (email signature, draft, template) is user data —
+                // never touched. Insertion is append/insert-only from here on.
+                CharSequence hint = focusedEditable.getHintText();
+                boolean hintMatch = hint != null && hint.toString().contentEquals(now);
+                if (hintMatch) base = "";
             }
             rememberKnown(key, base + text);
             // Insert at the cursor position when available; append otherwise.
@@ -477,11 +477,11 @@ public class BubbleService extends AccessibilityService {
             String out;
             if (base.isEmpty()) {
                 out = text;
-            } else if (sel <= base.length() && end <= base.length()) {
-                // If the whole text is selected, behave like typing: replace it.
-                out = (sel == 0 && end == base.length())
-                        ? text
-                        : base.substring(0, sel) + text + base.substring(end);
+            } else if (sel >= 0 && sel <= base.length() && end >= sel && end <= base.length()) {
+                // Never full-selection-replace: even if the app reports the
+                // whole field selected, INSERT at the cursor instead. User
+                // rule: dictation must never delete anything.
+                out = base.substring(0, sel) + text + base.substring(end);
             } else {
                 out = base + text; // safety — out-of-range selection
             }
