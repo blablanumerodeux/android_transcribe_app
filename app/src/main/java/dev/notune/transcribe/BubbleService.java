@@ -454,20 +454,25 @@ public class BubbleService extends AccessibilityService {
             // the recording would be captured and wrongly stripped (WhatsApp
             // poll forms). Focus snapshot = authoritative "this was empty".
             boolean isEmptyish = !userTypedSinceFocus
-                    && now.equals(focusSnapshot) && !now.isEmpty()
+                    && (now.equals(focusSnapshot) || focusSnapshot.isEmpty())
                     && (known == null || known.isEmpty());
-            if (isEmptyish) {
-                // Content unchanged since focus + nothing typed: the app put
-                // it there. Distinguish placeholder vs user data (email
-                // signature) by length: hints/labels are short one-liners.
-                // Anything >= 40 chars or multi-line is real content — keep.
-                boolean hintMatch = false;
+            boolean isEmptyish2 = isEmptyish && !now.isEmpty();
+            if (isEmptyish2) {
+                // Generic rule — works in ANY app, no per-app list:
+                // No text event since focus = the user never typed here, so
+                // the content is app-provided. Strip it when it looks like a
+                // placeholder (short single-line label) and the field was
+                // empty-or-identical at focus. Two cases covered:
+                //  a) placeholder present at focus (Signal "Signal message")
+                //  b) placeholder rendered ASYNC after focus (Keep "Note",
+                //     Telegram "Message") — focusSnapshot was empty
+                // Multi-line or long content (email signatures, templates,
+                // drafts) is NEVER stripped regardless of length rules.
                 CharSequence hint = focusedEditable.getHintText();
-                if (hint != null && hint.toString().contentEquals(now)) {
-                    hintMatch = true;
-                }
+                boolean hintMatch = hint != null && hint.toString().contentEquals(now);
                 boolean shortOneLiner = now.length() < 40 && !now.contains("\n");
-                if (hintMatch || shortOneLiner) base = "";
+                boolean unchangedOrEmpty = now.equals(focusSnapshot) || focusSnapshot.isEmpty();
+                if ((hintMatch || shortOneLiner) && unchangedOrEmpty) base = "";
             }
             rememberKnown(key, base + text);
             // Insert at the cursor position when available; append otherwise.
