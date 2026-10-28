@@ -457,13 +457,17 @@ public class BubbleService extends AccessibilityService {
                     && now.equals(focusSnapshot) && !now.isEmpty()
                     && (known == null || known.isEmpty());
             if (isEmptyish) {
-                // Conservative: strip ONLY when the content matches the node's
-                // exposed hint (a real placeholder). Pre-filled content that is
-                // NOT a hint (email signature, draft, template) is user data —
-                // never touched. Insertion is append/insert-only from here on.
+                // Content unchanged since focus + nothing typed: the app put
+                // it there. Distinguish placeholder vs user data (email
+                // signature) by length: hints/labels are short one-liners.
+                // Anything >= 40 chars or multi-line is real content — keep.
+                boolean hintMatch = false;
                 CharSequence hint = focusedEditable.getHintText();
-                boolean hintMatch = hint != null && hint.toString().contentEquals(now);
-                if (hintMatch) base = "";
+                if (hint != null && hint.toString().contentEquals(now)) {
+                    hintMatch = true;
+                }
+                boolean shortOneLiner = now.length() < 40 && !now.contains("\n");
+                if (hintMatch || shortOneLiner) base = "";
             }
             rememberKnown(key, base + text);
             // Insert at the cursor position when available; append otherwise.
